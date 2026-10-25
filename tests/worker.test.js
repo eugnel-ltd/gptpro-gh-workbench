@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildStatus, handleRequest, parseLimit } from "../src/worker.js";
+import worker, { buildStatus, handleRequest, parseLimit } from "../src/worker.js";
 
 const ORIGIN = "https://gptpro-gh-workbench.example";
 const TEST_ENV = { WORKBENCH_SESSION_TOKEN: "test-session" };
@@ -99,6 +99,62 @@ async function withMockedFetch(handler, fn) {
     globalThis.fetch = originalFetch;
   }
 }
+
+test("rate limiter denial returns 429 without calling GitHub", async () => {
+  const limitCalls = [];
+  const env = {
+    ...WRITE_ENV,
+    RATE_LIMIT: {
+      async limit(input) {
+        limitCalls.push(input);
+        return { success: false };
+      }
+    }
+  };
+
+  await withMockedFetch(
+    () => {
+      throw new Error("GitHub fetch must not run after rate-limit denial");
+    },
+    async (fetchCalls) => {
+      const response = await worker.fetch(new Request(
+        `${ORIGIN}/api/github/prs${SESSION}`,
+        { headers: { "CF-Connecting-IP": "203.0.113.7" } }
+      ), env, {});
+
+      assert.equal(response.status, 429);
+      assert.deepEqual(limitCalls, [{ key: "203.0.113.7" }]);
+      assert.equal(fetchCalls.length, 0);
+    }
+  );
+});
+
+test("allowed rate limiter request passes through to the route", async () => {
+  const limitCalls = [];
+  const env = {
+    ...WRITE_ENV,
+    RATE_LIMIT: {
+      async limit(input) {
+        limitCalls.push(input);
+        return { success: true };
+      }
+    }
+  };
+
+  await withMockedFetch(
+    () => Response.json([]),
+    async (fetchCalls) => {
+      const response = await worker.fetch(new Request(
+        `${ORIGIN}/api/github/prs${SESSION}`,
+        { headers: { "CF-Connecting-IP": "203.0.113.8" } }
+      ), env, {});
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(limitCalls, [{ key: "203.0.113.8" }]);
+      assert.equal(fetchCalls.length, 1);
+    }
+  );
+});
 
 test("status payload declares broker boundaries without GH_TOKEN", async () => {
   const response = await handleRequest(new Request(`${ORIGIN}/api/status${SESSION}`), TEST_ENV);
