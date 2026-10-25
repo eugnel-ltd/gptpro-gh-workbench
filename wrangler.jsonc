@@ -4,6 +4,13 @@
   "main": "src/worker.js",
   "compatibility_date": "2026-04-28",
   "workers_dev": false,
+  // Cost guard (ai-sdlc references/cloudflare.md). This small request broker
+  // needs no CPU-heavy work, so 50 ms stops a runaway isolate.
+  // Worst request: 2 KV operations + 3 GitHub fetches = 5; 10 leaves margin.
+  "limits": { "cpu_ms": 50, "subrequests": 10 },
+  "ratelimits": [
+    { "name": "RATE_LIMIT", "namespace_id": "8001", "simple": { "limit": 60, "period": 60 } }
+  ],
   "routes": [
     {
       "pattern": "gptpro-gh-workbench.eugnel.uk/*",

@@ -189,7 +189,16 @@ const CORS_HEADERS = {
 };
 
 export default {
-  fetch(request, env, ctx) {
+  async fetch(request, env, ctx) {
+    if (env?.RATE_LIMIT) {
+      const { success } = await env.RATE_LIMIT.limit({
+        key: request.headers.get("CF-Connecting-IP") || "unknown"
+      });
+      if (!success) {
+        return new Response("Too many requests", { status: 429 });
+      }
+    }
+
     return handleRequest(request, env, ctx);
   }
 };
